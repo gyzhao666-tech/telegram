@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS telegram_messages (
   date TIMESTAMPTZ NOT NULL,               -- 消息时间
   has_media BOOLEAN DEFAULT false,         -- 是否包含媒体
   media_type TEXT,                         -- 媒体类型
+  media_url TEXT,                          -- 媒体 URL（阿里云 OSS）
   reply_to_message_id BIGINT,              -- 回复的消息ID
   forward_from TEXT,                       -- 转发来源
   raw_data JSONB,                          -- 原始数据（可选）

@@ -3,10 +3,12 @@
  * 
  * 使用 GramJS (telegram) 库以用户身份登录
  * 只同步你已加入的群组和频道
+ * 图片上传到阿里云 OSS
  */
 
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { uploadBufferToOSS, isOSSConfigured } from '@/lib/oss'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60 // 1分钟超时
@@ -19,6 +21,10 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 export async function GET(request: Request) {
   const startTime = Date.now()
+  
+  // 检查 OSS 配置
+  const ossEnabled = isOSSConfigured()
+  console.log(`📦 OSS 存储: ${ossEnabled ? '已启用' : '未配置'}`)
   
   // 创建同步记录
   const { data: syncRun, error: syncRunError } = await supabase
@@ -179,12 +185,66 @@ export async function GET(request: Request) {
             }
           }
 
-          // 检查媒体类型
+          // 检查媒体类型并上传到 OSS
           let hasMedia = false
           let mediaType: string | null = null
+          let mediaUrl: string | null = null
+
           if (msg.media) {
             hasMedia = true
             mediaType = msg.media.className || 'unknown'
+            
+            // 只处理图片类型的媒体
+            if (ossEnabled && (
+              mediaType === 'MessageMediaPhoto' ||
+              (mediaType === 'MessageMediaDocument' && 
+               (msg.media as any)?.document?.mimeType?.startsWith('image/'))
+            )) {
+              try {
+                // 下载媒体
+                const buffer = await client.downloadMedia(msg.media, {
+                  workers: 1,
+                })
+                
+                if (buffer && Buffer.isBuffer(buffer)) {
+                  // 确定文件扩展名
+                  let ext = 'jpg'
+                  if (mediaType === 'MessageMediaDocument') {
+                    const mimeType = (msg.media as any)?.document?.mimeType || ''
+                    if (mimeType.includes('png')) ext = 'png'
+                    else if (mimeType.includes('gif')) ext = 'gif'
+                    else if (mimeType.includes('webp')) ext = 'webp'
+                  }
+                  
+                  // 上传到 OSS
+                  mediaUrl = await uploadBufferToOSS(buffer, chatId, messageId, ext)
+                  if (mediaUrl) {
+                    console.log(`  📷 ${messageId} -> OSS (${Math.round(buffer.length / 1024)}KB)`)
+                  }
+                }
+              } catch (downloadError: any) {
+                console.log(`  ⚠️ 下载媒体失败: ${downloadError.message}`)
+              }
+            }
+          }
+
+          // 提取 entities 用于链接和 hashtag
+          const entities = msg.entities?.map((e: any) => ({
+            type: e.className,
+            offset: e.offset,
+            length: e.length,
+            url: e.url || null,
+          })) || []
+
+          // 提取 reply_markup 中的按钮
+          let buttons: any[] = []
+          if (msg.replyMarkup && (msg.replyMarkup as any).rows) {
+            buttons = (msg.replyMarkup as any).rows.flatMap((row: any) =>
+              row.buttons?.map((btn: any) => ({
+                text: btn.text,
+                url: btn.url || null,
+              })) || []
+            )
           }
 
           // 插入消息
@@ -199,11 +259,18 @@ export async function GET(request: Request) {
               date: new Date((msg.date || 0) * 1000).toISOString(),
               has_media: hasMedia,
               media_type: mediaType,
+              media_url: mediaUrl,
               reply_to_message_id: msg.replyTo?.replyToMsgId || null,
               forward_from: msg.fwdFrom?.fromName || null,
+              raw_data: {
+                entities,
+                buttons,
+                views: msg.views || 0,
+                forwards: msg.forwards || 0,
+              },
             }, {
               onConflict: 'chat_id,message_id',
-              ignoreDuplicates: true,
+              ignoreDuplicates: false, // 允许更新（可能需要补充图片）
             })
 
           if (!msgError) {
@@ -261,7 +328,7 @@ export async function GET(request: Request) {
     chatsSynced,
     messagesSynced,
     duration,
+    ossEnabled,
     error: errorMessage,
   })
 }
-

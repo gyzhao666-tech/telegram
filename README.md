@@ -9,6 +9,8 @@
 - 📊 **Web 仪表盘** - 浏览群组列表、搜索消息、查看同步记录
 - 🔐 **密码保护** - 管理后台需要密码登录
 - 🚀 **增量同步** - 只拉取上次同步后的新消息，避免重复
+- 🖼️ **图片存储** - 自动下载图片并上传到阿里云 OSS
+- 🔗 **链接解析** - 消息中的链接、标签可点击跳转
 
 ## 🚀 快速开始
 
@@ -102,7 +104,8 @@ telegram-sync-dashboard/
 │   ├── layout.tsx
 │   └── globals.css
 ├── lib/
-│   └── supabase.ts         # Supabase 客户端
+│   ├── supabase.ts         # Supabase 客户端
+│   └── oss.ts              # 阿里云 OSS 工具
 ├── scripts/
 │   └── generate-session.ts # Session 生成脚本
 ├── supabase/
@@ -141,6 +144,19 @@ telegram-sync-dashboard/
 | TELEGRAM_SESSION | ✅ | Telegram 登录 Session |
 | ADMIN_PASSWORD | ❌ | 管理后台密码（默认 admin123）|
 | CRON_SECRET | ❌ | Cron 接口保护密钥 |
+| OSS_ACCESS_KEY_ID | ❌ | 阿里云 OSS Access Key ID（图片存储）|
+| OSS_ACCESS_KEY_SECRET | ❌ | 阿里云 OSS Access Key Secret |
+| OSS_BUCKET | ❌ | 阿里云 OSS Bucket 名称 |
+| OSS_REGION | ❌ | 阿里云 OSS Region（默认 oss-cn-beijing）|
+
+### 阿里云 OSS 配置（可选）
+
+如果配置了 OSS 环境变量，同步时会自动下载 Telegram 图片并上传到阿里云 OSS，这样：
+- ✅ 图片加载更快（CDN 加速）
+- ✅ 不占用 Supabase 数据库空间
+- ✅ 图片链接永久有效
+
+如果不配置，图片将不会被保存。
 
 ## ⚠️ 注意事项
 

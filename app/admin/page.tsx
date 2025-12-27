@@ -42,8 +42,8 @@ interface MessageButton {
 interface MessageRaw {
   entities?: MessageEntity[]
   buttons?: MessageButton[]
-  mediaType?: string | null
-  mediaData?: string | null  // base64 data URL
+  views?: number
+  forwards?: number
 }
 
 interface Message {
@@ -54,9 +54,12 @@ interface Message {
   text: string
   date: string
   has_media: boolean
+  media_type: string | null
+  media_url: string | null  // 阿里云 OSS URL
   views?: number
   forwards?: number
   raw?: MessageRaw | null
+  raw_data?: MessageRaw | null  // 兼容两种字段名
 }
 
 interface SyncRun {
@@ -197,7 +200,8 @@ export default function AdminDashboard() {
   // 渲染带链接的消息文本
   const renderMessageText = (msg: Message) => {
     const text = msg.text || ''
-    const entities = msg.raw?.entities || []
+    const rawData = msg.raw_data || msg.raw  // 兼容两种字段名
+    const entities = rawData?.entities || []
     
     // 过滤出需要特殊处理的实体（链接 + 标签）
     const specialEntities = entities.filter(e => 
@@ -273,7 +277,8 @@ export default function AdminDashboard() {
 
   // 渲染按钮链接
   const renderButtons = (msg: Message) => {
-    const buttons = msg.raw?.buttons || []
+    const rawData = msg.raw_data || msg.raw  // 兼容两种字段名
+    const buttons = rawData?.buttons || []
     if (buttons.length === 0) return null
     
     return (
@@ -296,18 +301,38 @@ export default function AdminDashboard() {
     )
   }
 
-  // 渲染媒体（图片）
+  // 渲染媒体（图片）- 支持 OSS URL
   const renderMedia = (msg: Message) => {
-    const mediaData = msg.raw?.mediaData
-    if (!mediaData) return null
+    // 优先使用 OSS URL
+    const mediaUrl = msg.media_url
+    if (!mediaUrl) return null
+    
+    // 检查是否是图片类型
+    const isImage = msg.media_type?.includes('Photo') || 
+                   mediaUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+    
+    if (!isImage) {
+      // 非图片类型显示文件图标
+      return (
+        <div className="mt-3 flex items-center gap-2 text-gray-500 text-sm">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+          </svg>
+          <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+            下载附件
+          </a>
+        </div>
+      )
+    }
     
     return (
       <div className="mt-3">
         <img 
-          src={mediaData} 
+          src={mediaUrl} 
           alt="消息图片"
           className="max-w-full max-h-96 rounded-lg border border-gray-200 cursor-pointer hover:opacity-90 transition"
-          onClick={() => window.open(mediaData, '_blank')}
+          onClick={() => window.open(mediaUrl, '_blank')}
+          loading="lazy"
         />
       </div>
     )
@@ -609,11 +634,11 @@ TELEGRAM_SESSION=your-session-string`}
                           </div>
                           {renderButtons(msg)}
                           {renderMedia(msg)}
-                          {msg.views && msg.views > 0 && (
+                          {((msg.raw_data || msg.raw)?.views || msg.views) > 0 && (
                             <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
-                              <span>👁 {msg.views.toLocaleString()}</span>
-                              {msg.forwards && msg.forwards > 0 && (
-                                <span>↗ {msg.forwards.toLocaleString()}</span>
+                              <span>👁 {((msg.raw_data || msg.raw)?.views || msg.views || 0).toLocaleString()}</span>
+                              {((msg.raw_data || msg.raw)?.forwards || msg.forwards) > 0 && (
+                                <span>↗ {((msg.raw_data || msg.raw)?.forwards || msg.forwards || 0).toLocaleString()}</span>
                               )}
                             </div>
                           )}
