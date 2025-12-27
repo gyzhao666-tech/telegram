@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/telegram-sync",
+      "schedule": "*/1 * * * *"
+    }
+  ],
+  "functions": {
+    "app/api/cron/telegram-sync/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}
+
+
