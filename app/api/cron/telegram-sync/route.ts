@@ -178,6 +178,7 @@ export async function GET(request: Request) {
         // 拉取消息
         const lastMessageId = chatRecord.last_message_id || 0
         const oldestMessageId = chatRecord.oldest_message_id || 0
+        console.log(`  📊 数据库状态: last=${lastMessageId}, oldest=${oldestMessageId}`)
         
         let messages: any[] = []
         
@@ -363,12 +364,17 @@ export async function GET(request: Request) {
         // 只有获取到更早的消息才更新 oldest_message_id
         if (minMsgId < (oldestMessageId || Number.MAX_SAFE_INTEGER)) {
           updateData.oldest_message_id = minMsgId
+          console.log(`  📝 更新 oldest_message_id: ${oldestMessageId} -> ${minMsgId}`)
         }
         
-        await supabase
+        const { error: updateError } = await supabase
           .from('telegram_chats')
           .update(updateData)
           .eq('chat_id', chatRecord.chat_id)
+        
+        if (updateError) {
+          console.error(`  ⚠️ 更新 chat 失败: ${updateError.message}`)
+        }
 
         console.log(`  ✅ 保存 ${savedCount} 条消息`)
         messagesSynced += savedCount
