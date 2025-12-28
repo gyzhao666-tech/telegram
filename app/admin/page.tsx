@@ -636,14 +636,19 @@ TELEGRAM_SESSION=your-session-string`}
                           </div>
                           {renderButtons(msg)}
                           {renderMedia(msg)}
-                          {((msg.raw_data || msg.raw)?.views || msg.views) > 0 && (
-                            <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
-                              <span>👁 {((msg.raw_data || msg.raw)?.views || msg.views || 0).toLocaleString()}</span>
-                              {((msg.raw_data || msg.raw)?.forwards || msg.forwards) > 0 && (
-                                <span>↗ {((msg.raw_data || msg.raw)?.forwards || msg.forwards || 0).toLocaleString()}</span>
-                              )}
-                            </div>
-                          )}
+                          {(() => {
+                            const rawData = msg.raw_data || msg.raw
+                            const views = rawData?.views ?? msg.views ?? 0
+                            const forwards = rawData?.forwards ?? msg.forwards ?? 0
+                            return views > 0 ? (
+                              <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
+                                <span>👁 {views.toLocaleString()}</span>
+                                {forwards > 0 && (
+                                  <span>↗ {forwards.toLocaleString()}</span>
+                                )}
+                              </div>
+                            ) : null
+                          })()}
                         </div>
                       </div>
                     </div>
