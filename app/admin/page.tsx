@@ -146,13 +146,15 @@ export default function AdminDashboard() {
 
   async function loadMessages(chatId: string) {
     if (!supabase) return
-    const { data } = await supabase
+    console.log(`🔍 加载消息 chat_id=${chatId}`)
+    const { data, error } = await supabase
       .from('telegram_messages')
       .select('*')
       .eq('chat_id', chatId)
       .order('date', { ascending: false })
       .limit(100)
 
+    console.log(`📊 查询结果: ${data?.length || 0} 条, 错误: ${error?.message || '无'}`)
     if (data) {
       setMessages(data)
     }

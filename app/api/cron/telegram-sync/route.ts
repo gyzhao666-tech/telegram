@@ -22,6 +22,13 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 export async function GET(request: Request) {
   const startTime = Date.now()
   
+  // 检查是否强制全量同步
+  const url = new URL(request.url)
+  const forceFullSync = url.searchParams.get('full') === 'true'
+  if (forceFullSync) {
+    console.log(`🔄 强制全量同步模式`)
+  }
+  
   // 检查 OSS 配置
   const ossEnabled = isOSSConfigured()
   console.log(`📦 OSS 存储: ${ossEnabled ? '已启用' : '未配置'}`)
@@ -62,9 +69,27 @@ export async function GET(request: Request) {
     const { StringSession } = await import('telegram/sessions')
 
     const stringSession = new StringSession(sessionString)
-    const client = new TelegramClient(stringSession, apiId, apiHash, {
-      connectionRetries: 3,
-    })
+    
+    // 配置代理（本地开发用）
+    const proxyPort = process.env.PROXY_PORT || '7897'
+    const useProxy = process.env.USE_PROXY === 'true'
+    
+    const clientOptions: any = {
+      connectionRetries: 5,
+      timeout: 30,
+    }
+    
+    // 如果配置了代理
+    if (useProxy) {
+      console.log(`🌐 使用代理: socks5://127.0.0.1:${proxyPort}`)
+      clientOptions.proxy = {
+        ip: '127.0.0.1',
+        port: parseInt(proxyPort),
+        socksType: 5,
+      }
+    }
+    
+    const client = new TelegramClient(stringSession, apiId, apiHash, clientOptions)
 
     await client.connect()
     console.log('✅ Telegram 客户端已连接')
@@ -73,9 +98,18 @@ export async function GET(request: Request) {
     const dialogs = await client.getDialogs({ limit: 100 })
     console.log(`📋 找到 ${dialogs.length} 个对话`)
 
+    // 只处理指定的频道（可配置）
+    const ALLOWED_CHANNELS = process.env.ALLOWED_CHANNELS?.split(',') || ['财联社VIP文章分享']
+    
     // 过滤出群组和频道
     const targetDialogs = dialogs.filter(d => {
       const entity = d.entity as any
+      const title = d.title || entity?.title || ''
+      
+      // 只处理允许列表中的频道
+      const isAllowed = ALLOWED_CHANNELS.some(name => title.includes(name.trim()))
+      if (!isAllowed) return false
+      
       // 包含群组、超级群组、频道
       return entity?.className === 'Channel' || 
              entity?.className === 'Chat' ||
@@ -83,7 +117,7 @@ export async function GET(request: Request) {
              (entity?.broadcast === true)
     })
 
-    console.log(`📱 筛选出 ${targetDialogs.length} 个群组/频道`)
+    console.log(`📱 筛选出 ${targetDialogs.length} 个群组/频道 (只处理: ${ALLOWED_CHANNELS.join(', ')})`)
 
     for (const dialog of targetDialogs) {
       try {
@@ -141,22 +175,59 @@ export async function GET(request: Request) {
             .eq('chat_id', chatRecord.chat_id)
         }
 
-        // 拉取新消息（增量：只拉 last_message_id 之后的）
+        // 拉取消息
         const lastMessageId = chatRecord.last_message_id || 0
+        const oldestMessageId = chatRecord.oldest_message_id || 0
         
-        const messages = await client.getMessages(entity, {
-          limit: MAX_MESSAGES_PER_CHAT,
-          minId: lastMessageId,
-        })
+        let messages: any[] = []
+        
+        if (forceFullSync) {
+          // 强制全量模式：向后翻页获取历史消息
+          if (oldestMessageId > 0) {
+            // 有 oldest_message_id，从这里向后翻页
+            console.log(`  📍 向后翻页: offsetId=${oldestMessageId}`)
+            messages = await client.getMessages(entity, {
+              limit: MAX_MESSAGES_PER_CHAT,
+              offsetId: oldestMessageId,
+            })
+          } else if (lastMessageId > 0) {
+            // 有 last_message_id 但没有 oldest_message_id，从最新消息开始向后
+            console.log(`  📍 从最新消息向后翻页: offsetId=${lastMessageId + 1}`)
+            messages = await client.getMessages(entity, {
+              limit: MAX_MESSAGES_PER_CHAT,
+              offsetId: lastMessageId + 1,
+            })
+          } else {
+            // 都没有，获取最新消息
+            console.log(`  📍 首次同步`)
+            messages = await client.getMessages(entity, {
+              limit: MAX_MESSAGES_PER_CHAT,
+            })
+          }
+        } else if (lastMessageId > 0) {
+          // 增量同步：获取 last_message_id 之后的新消息
+          console.log(`  📍 增量同步: minId=${lastMessageId}`)
+          messages = await client.getMessages(entity, {
+            limit: MAX_MESSAGES_PER_CHAT,
+            minId: lastMessageId,
+          })
+        } else {
+          // 首次同步：获取最新的消息
+          console.log(`  📍 首次同步`)
+          messages = await client.getMessages(entity, {
+            limit: MAX_MESSAGES_PER_CHAT,
+          })
+        }
 
         if (messages.length === 0) {
-          console.log(`  📭 无新消息`)
+          console.log(`  📭 无${forceFullSync ? '更多历史' : '新'}消息`)
           continue
         }
 
-        console.log(`  📨 找到 ${messages.length} 条新消息`)
+        console.log(`  📨 找到 ${messages.length} 条消息`)
 
         let maxMsgId = lastMessageId
+        let minMsgId = oldestMessageId || Number.MAX_SAFE_INTEGER
         let savedCount = 0
 
         for (const msg of messages) {
@@ -165,6 +236,7 @@ export async function GET(request: Request) {
 
           const messageId = msg.id
           if (messageId > maxMsgId) maxMsgId = messageId
+          if (messageId < minMsgId) minMsgId = messageId
 
           // 获取发送者信息
           let senderId: string | null = null
@@ -261,30 +333,41 @@ export async function GET(request: Request) {
               media_type: mediaType,
               media_url: mediaUrl,
               reply_to_message_id: msg.replyTo?.replyToMsgId || null,
-              forward_from: msg.fwdFrom?.fromName || null,
               raw_data: {
                 entities,
                 buttons,
                 views: msg.views || 0,
                 forwards: msg.forwards || 0,
+                forward_from: msg.fwdFrom?.fromName || null,
               },
             }, {
               onConflict: 'chat_id,message_id',
               ignoreDuplicates: false, // 允许更新（可能需要补充图片）
             })
 
-          if (!msgError) {
+          if (msgError) {
+            console.log(`  ⚠️ 保存消息失败: ${JSON.stringify(msgError)}`)
+          } else {
             savedCount++
           }
         }
 
-        // 更新 chat 的 last_message_id
+        // 更新 chat 的 last_message_id 和 oldest_message_id
+        const updateData: any = { 
+          last_synced_at: new Date().toISOString(),
+        }
+        // 只有获取到更新的消息才更新 last_message_id
+        if (maxMsgId > lastMessageId) {
+          updateData.last_message_id = maxMsgId
+        }
+        // 只有获取到更早的消息才更新 oldest_message_id
+        if (minMsgId < (oldestMessageId || Number.MAX_SAFE_INTEGER)) {
+          updateData.oldest_message_id = minMsgId
+        }
+        
         await supabase
           .from('telegram_chats')
-          .update({ 
-            last_message_id: maxMsgId,
-            last_synced_at: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq('chat_id', chatRecord.chat_id)
 
         console.log(`  ✅ 保存 ${savedCount} 条消息`)
