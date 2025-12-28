@@ -275,9 +275,7 @@ export async function GET(request: Request) {
             )) {
               try {
                 // 下载媒体
-                const buffer = await client.downloadMedia(msg.media, {
-                  workers: 1,
-                })
+                const buffer = await client.downloadMedia(msg.media, {})
                 
                 if (buffer && Buffer.isBuffer(buffer)) {
                   // 确定文件扩展名
